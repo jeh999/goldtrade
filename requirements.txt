@@ -3,6 +3,6 @@ requests
 pandas
 textblob
 numpy
-ta-lib
+pandas-ta
 telethon
 streamlit-autorefresh
