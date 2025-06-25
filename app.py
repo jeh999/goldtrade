@@ -1,28 +1,29 @@
 import streamlit as st
 import requests
 from textblob import TextBlob
+from datetime import datetime, timedelta
 import pandas as pd
-import talib
+import pandas_ta as ta
 import numpy as np
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
+import re
 from streamlit_autorefresh import st_autorefresh
 
-# Auto refresh every 60 seconds
+# Auto-refresh every 60 seconds
 st_autorefresh(interval=60000, limit=None, key="datarefresh")
 
-# Load secrets from Streamlit Secrets manager
-NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
-TELEGRAM_API_ID = int(st.secrets["TELEGRAM_API_ID"])
-TELEGRAM_API_HASH = st.secrets["TELEGRAM_API_HASH"]
-
-# Config URLs
+# --------------- Configs -------------------
 TRADINGVIEW_XAUUSD_FEED = "https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&apikey=demo"
+NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
 NEWS_API_URL = f"https://newsapi.org/v2/everything?q=gold+OR+XAUUSD&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}"
 
-# Telegram channel username (without @)
-TELEGRAM_CHANNEL = 'gary_thetrader'
+# Telegram API credentials (use Streamlit secrets)
+TELEGRAM_API_ID = int(st.secrets["TELEGRAM_API_ID"])
+TELEGRAM_API_HASH = st.secrets["TELEGRAM_API_HASH"]
+TELEGRAM_CHANNEL = 'gary_thetrader'  # Without @
 
+# --------------- Functions -------------------
 def fetch_chart_data():
     response = requests.get(TRADINGVIEW_XAUUSD_FEED)
     data = response.json()
@@ -37,8 +38,9 @@ def fetch_chart_data():
     return df
 
 def analyze_technical_indicators(df):
-    df['RSI'] = talib.RSI(df['close'], timeperiod=14)
-    df['MACD'], _, df['MACD_HIST'] = talib.MACD(df['close'])
+    df['RSI'] = ta.rsi(df['close'], length=14)
+    macd = ta.macd(df['close'])
+    df['MACD_HIST'] = macd['MACDh_12_26_9']
     last = df.iloc[-1]
     return {
         'RSI': last['RSI'],
@@ -59,28 +61,32 @@ def analyze_news_sentiment(articles):
     return np.mean(sentiment_scores) if sentiment_scores else 0
 
 def get_latest_telegram_signal():
-    client = TelegramClient('session_gary', TELEGRAM_API_ID, TELEGRAM_API_HASH)
-    with client:
-        channel = client.get_entity(TELEGRAM_CHANNEL)
-        history = client(GetHistoryRequest(
-            peer=channel,
-            limit=10,
-            offset_date=None,
-            offset_id=0,
-            max_id=0,
-            min_id=0,
-            add_offset=0,
-            hash=0
-        ))
-        for message in history.messages:
-            msg = message.message.upper()
-            if 'XAUUSD' in msg:
-                if 'BUY' in msg:
-                    return 'buy'
-                elif 'SELL' in msg:
-                    return 'sell'
-                elif 'WAIT' in msg or 'AVOID' in msg:
-                    return 'uncertain'
+    try:
+        client = TelegramClient('session_gary', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        with client:
+            channel = client.get_entity(TELEGRAM_CHANNEL)
+            history = client(GetHistoryRequest(
+                peer=channel,
+                limit=10,
+                offset_date=None,
+                offset_id=0,
+                max_id=0,
+                min_id=0,
+                add_offset=0,
+                hash=0
+            ))
+            for message in history.messages:
+                msg = message.message.upper()
+                if 'XAUUSD' in msg:
+                    if 'BUY' in msg:
+                        return 'buy'
+                    elif 'SELL' in msg:
+                        return 'sell'
+                    elif 'WAIT' in msg or 'AVOID' in msg:
+                        return 'uncertain'
+            return 'uncertain'
+    except Exception as e:
+        st.warning(f"Failed to fetch Telegram signal: {e}")
         return 'uncertain'
 
 def classify_signal(rsi, macd_hist, news_sentiment, telegram_signal):
@@ -91,7 +97,7 @@ def classify_signal(rsi, macd_hist, news_sentiment, telegram_signal):
     else:
         return "Don't Trade"
 
-# Streamlit UI
+# --------------- Streamlit UI -------------------
 st.title("XAU/USD AI Signal Bot")
 
 chart_data = fetch_chart_data()
