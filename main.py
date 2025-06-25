@@ -1,13 +1,10 @@
 import streamlit as st
 import requests
 from textblob import TextBlob
-from datetime import datetime, timedelta
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
-import re
 from streamlit_autorefresh import st_autorefresh
 
 # Auto-refresh every 60 seconds
@@ -37,10 +34,27 @@ def fetch_chart_data():
         df[col] = df[col].astype(float)
     return df
 
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_macd(series):
+    exp1 = series.ewm(span=12, adjust=False).mean()
+    exp2 = series.ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    macd_hist = macd - signal
+    return macd_hist
+
 def analyze_technical_indicators(df):
-    df['RSI'] = ta.rsi(df['close'], length=14)
-    macd = ta.macd(df['close'])
-    df['MACD_HIST'] = macd['MACDh_12_26_9']
+    df['RSI'] = calculate_rsi(df['close'])
+    df['MACD_HIST'] = calculate_macd(df['close'])
     last = df.iloc[-1]
     return {
         'RSI': last['RSI'],
