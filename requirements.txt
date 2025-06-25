@@ -3,7 +3,5 @@ requests
 pandas
 textblob
 numpy
-pandas-ta
 telethon
 streamlit-autorefresh
-setuptools
