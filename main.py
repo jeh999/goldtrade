@@ -11,7 +11,9 @@ from streamlit_autorefresh import st_autorefresh
 st_autorefresh(interval=60000, limit=None, key="datarefresh")
 
 # --------------- Configs -------------------
-TRADINGVIEW_XAUUSD_FEED = "https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&apikey=demo"
+TWELVEDATA_API_KEY = st.secrets["TWELVEDATA_API_KEY"]
+TRADINGVIEW_XAUUSD_FEED = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&apikey={TWELVEDATA_API_KEY}"
+
 NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
 NEWS_API_URL = f"https://newsapi.org/v2/everything?q=gold+OR+XAUUSD&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}"
 
@@ -23,9 +25,16 @@ TELEGRAM_CHANNEL = 'gary_thetrader'  # Without @
 # --------------- Functions -------------------
 def fetch_chart_data():
     response = requests.get(TRADINGVIEW_XAUUSD_FEED)
-    data = response.json()
-    if 'values' not in data:
+    try:
+        data = response.json()
+    except Exception as e:
+        st.error(f"Failed to parse chart data JSON: {e}")
         return pd.DataFrame()
+
+    if 'values' not in data:
+        st.error(f"Unexpected API response: {data}")
+        return pd.DataFrame()
+
     df = pd.DataFrame(data['values'])
     df = df.rename(columns={"datetime": "date", "close": "close", "open": "open", "high": "high", "low": "low"})
     df['date'] = pd.to_datetime(df['date'])
