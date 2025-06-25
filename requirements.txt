@@ -6,3 +6,4 @@ numpy
 pandas-ta
 telethon
 streamlit-autorefresh
+setuptools
