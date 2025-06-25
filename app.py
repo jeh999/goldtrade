@@ -3,9 +3,9 @@ import requests
 from textblob import TextBlob
 import pandas as pd
 import numpy as np
-from telethon.sync import TelegramClient
-from telethon.tl.functions.messages import GetHistoryRequest
+from telethon import TelegramClient
 from streamlit_autorefresh import st_autorefresh
+import asyncio
 
 # Auto-refresh every 60 seconds
 st_autorefresh(interval=60000, limit=None, key="datarefresh")
@@ -17,7 +17,6 @@ TRADINGVIEW_XAUUSD_FEED = f"https://api.twelvedata.com/time_series?symbol=XAU/US
 NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
 NEWS_API_URL = f"https://newsapi.org/v2/everything?q=gold+OR+XAUUSD&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}"
 
-# Telegram API credentials (use Streamlit secrets)
 TELEGRAM_API_ID = int(st.secrets["TELEGRAM_API_ID"])
 TELEGRAM_API_HASH = st.secrets["TELEGRAM_API_HASH"]
 TELEGRAM_CHANNEL = 'gary_thetrader'  # Without @
@@ -84,21 +83,13 @@ def analyze_news_sentiment(articles):
     return np.mean(sentiment_scores) if sentiment_scores else 0
 
 def get_latest_telegram_signal():
-    try:
-        client = TelegramClient('session_gary', TELEGRAM_API_ID, TELEGRAM_API_HASH)
-        with client:
-            channel = client.get_entity(TELEGRAM_CHANNEL)
-            history = client(GetHistoryRequest(
-                peer=channel,
-                limit=10,
-                offset_date=None,
-                offset_id=0,
-                max_id=0,
-                min_id=0,
-                add_offset=0,
-                hash=0
-            ))
-            for message in history.messages:
+    async def fetch_signal():
+        try:
+            client = TelegramClient('session_gary', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+            await client.start()
+            channel = await client.get_entity(TELEGRAM_CHANNEL)
+            history = await client.get_messages(channel, limit=10)
+            for message in history:
                 msg = message.message.upper()
                 if 'XAUUSD' in msg:
                     if 'BUY' in msg:
@@ -108,9 +99,19 @@ def get_latest_telegram_signal():
                     elif 'WAIT' in msg or 'AVOID' in msg:
                         return 'uncertain'
             return 'uncertain'
-    except Exception as e:
-        st.warning(f"Failed to fetch Telegram signal: {e}")
+        except Exception as e:
+            return f"error: {e}"
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(fetch_signal())
+    loop.close()
+
+    if isinstance(result, str) and result.startswith("error:"):
+        st.warning(f"Failed to fetch Telegram signal: {result[7:]}")
         return 'uncertain'
+    else:
+        return result
 
 def classify_signal(rsi, macd_hist, news_sentiment, telegram_signal):
     if rsi < 30 and macd_hist > 0 and news_sentiment > 0.2 and telegram_signal == "buy":
