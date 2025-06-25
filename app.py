@@ -1,20 +1,19 @@
 import streamlit as st
 import requests
 from textblob import TextBlob
-from datetime import datetime, timedelta
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
-import re
 from streamlit_autorefresh import st_autorefresh
 
 # Auto-refresh every 60 seconds
 st_autorefresh(interval=60000, limit=None, key="datarefresh")
 
 # --------------- Configs -------------------
-TRADINGVIEW_XAUUSD_FEED = "https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&apikey=demo"
+TWELVEDATA_API_KEY = st.secrets["TWELVEDATA_API_KEY"]
+TRADINGVIEW_XAUUSD_FEED = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&apikey={TWELVEDATA_API_KEY}"
+
 NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
 NEWS_API_URL = f"https://newsapi.org/v2/everything?q=gold+OR+XAUUSD&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}"
 
@@ -26,9 +25,16 @@ TELEGRAM_CHANNEL = 'gary_thetrader'  # Without @
 # --------------- Functions -------------------
 def fetch_chart_data():
     response = requests.get(TRADINGVIEW_XAUUSD_FEED)
-    data = response.json()
-    if 'values' not in data:
+    try:
+        data = response.json()
+    except Exception as e:
+        st.error(f"Failed to parse chart data JSON: {e}")
         return pd.DataFrame()
+
+    if 'values' not in data:
+        st.error(f"Unexpected API response: {data}")
+        return pd.DataFrame()
+
     df = pd.DataFrame(data['values'])
     df = df.rename(columns={"datetime": "date", "close": "close", "open": "open", "high": "high", "low": "low"})
     df['date'] = pd.to_datetime(df['date'])
@@ -37,10 +43,27 @@ def fetch_chart_data():
         df[col] = df[col].astype(float)
     return df
 
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_macd(series):
+    exp1 = series.ewm(span=12, adjust=False).mean()
+    exp2 = series.ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    macd_hist = macd - signal
+    return macd_hist
+
 def analyze_technical_indicators(df):
-    df['RSI'] = ta.rsi(df['close'], length=14)
-    macd = ta.macd(df['close'])
-    df['MACD_HIST'] = macd['MACDh_12_26_9']
+    df['RSI'] = calculate_rsi(df['close'])
+    df['MACD_HIST'] = calculate_macd(df['close'])
     last = df.iloc[-1]
     return {
         'RSI': last['RSI'],
